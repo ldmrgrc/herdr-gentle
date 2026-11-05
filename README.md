@@ -50,7 +50,7 @@ El instalador hace esto:
 6. Escribe `~/.config/herdr-core/templates/gentle-{explorer,writer,verifier,worker}-<agente>.md`. Codex se lanza con `--no-daemon`, como pide hc. Los agentes que no reportan estado usan `ready: quiet`.
 7. Copia el mod a `~/.config/herdr-app/mods/gentle` y el tema a `~/.config/herdr-app/themes/`. Luego ejecuta `herdr-app check` sobre el mod y enlaza `gentle-usage`, `herdr-gentle-doctor` y `herdr-gentle-init` en `~/.local/bin`.
 
-No modifica tu `keys.json` ni los layouts que trae la app. El mod se acopla solo a la derecha la primera vez.
+No modifica tu `keys.json` ni los layouts que trae la app. El mod se acopla solo a la derecha la primera vez. Cada cambio queda anotado para que `./uninstall.sh` lo pueda deshacer.
 
 ## Uso
 
@@ -93,4 +93,24 @@ Los costos estimados salen de `usage/prices.json`. Para corregirlos, copia ese a
 - **CodeGraph:** para que su guía aparezca en el prompt del agente, ejecuta `gentle-ai` una vez y marca *Community Tools → CodeGraph*.
 - **Actualizar:** `git pull && ./install.sh`. Las skills son enlaces y se actualizan solas; el mod y los templates se vuelven a copiar.
 - **Plataformas:** probado para Linux y macOS. Windows queda pendiente.
-- **Quitarlo:** borra `~/.config/herdr-app/mods/gentle`, `~/.config/herdr-core/templates/gentle-*.md` y los enlaces de skills. Para Gentle AI, usa `gentle-ai restore`.
+
+## Desinstalar
+
+```bash
+./uninstall.sh --dry-run   # muestra qué va a deshacer
+./uninstall.sh
+```
+
+El instalador anota cada cambio en `~/.local/state/herdr-gentle/install.log`. `uninstall.sh` lo deshace en orden inverso y te deja la máquina como estaba antes de instalar:
+
+- Borra lo que creó: skills, templates, el mod, el tema y los comandos de `~/.local/bin`. Si pisó un archivo tuyo, lo restaura desde la copia que guardó, y borra las carpetas que creó si quedan vacías.
+- Quita CodeGraph **solo** de los agentes donde lo puso él (`codegraph uninstall --target … --keep-cli`). La CLI de CodeGraph solo la desinstala si la instaló él.
+- Quita el índice de CodeGraph (`codegraph uninit`) de los proyectos que indexó `herdr-gentle-init`, y la línea `.codegraph/` del `exclude` si la agregó él.
+- Vuelve a poner el tema de la app que tenías.
+- Restaura Gentle AI al backup que el propio `gentle-ai` guardó justo antes de la instalación (`gentle-ai restore <id>`). Con `--keep-gentle` se salta este paso. **Ojo:** eso también deshace los cambios que hayas hecho en la configuración de tus agentes después de instalar.
+
+Antes de cambiar nada te pide confirmación (`--yes` para no preguntar). Si algún paso falla, conserva el registro para que puedas volver a ejecutarlo.
+
+Dos cosas no puede deshacer solo:
+- Si el panel Gentle quedó acoplado en la app, ciérralo.
+- Si `gentle-ai install` instaló Engram y no lo quieres, desinstálalo con tu gestor de paquetes.

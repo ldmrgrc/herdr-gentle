@@ -18,17 +18,22 @@
 #   --no-codegraph     No instalar CodeGraph
 #   --dry-run          Solo mostrar lo que se haría
 #   -h, --help         Esta ayuda
+#
+# Todo cambio queda anotado en ~/.local/state/herdr-gentle/install.log;
+# ./uninstall.sh lo deshace y deja tu máquina como estaba.
 set -u
 
 HG_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/common.sh
 . "$HG_ROOT/lib/common.sh"
+# shellcheck source=lib/state.sh
+. "$HG_ROOT/lib/state.sh"
 
 AGENTS=""; PERSONA="gentleman"; GENTLE_MODE="auto"; WITH_CODEGRAPH=1; APPLY_THEME=0
 APP_HOME="${HERDR_APP_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}/herdr-app}"
 HC_TEMPLATES="${XDG_CONFIG_HOME:-$HOME/.config}/herdr-core/templates"
 
-usage() { sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 while [ $# -gt 0 ]; do
   case "$1" in
     --agents|--agent) AGENTS="$2"; shift 2 ;;
@@ -57,6 +62,8 @@ else fail "herdr-core (hc) no está → lo instala el instalador de la app, o: c
 if have gentle-ai; then ok "gentle-ai"
 elif [ "$GENTLE_MODE" != skip ]; then fail "gentle-ai no está → brew install gentleman-programming/tap/gentle-ai"; missing=1; fi
 [ "$missing" = 1 ] && [ "$HG_DRY_RUN" != 1 ] && die "Instala lo que falta y vuelve a ejecutar ./install.sh"
+st_init
+[ "$HG_DRY_RUN" = 1 ] || info "Registro de cambios: $HG_LOG"
 
 # ---------------------------------------------------------------------------
 step "2/7 Agentes"
@@ -81,6 +88,16 @@ GA_STATE="${GENTLE_AI_HOME:-$HOME/.gentle-ai}/state.json"
 if [ "$GENTLE_MODE" = auto ]; then
   if [ -f "$GA_STATE" ]; then GENTLE_MODE=sync; else GENTLE_MODE=install; fi
 fi
+# IDs de backups de Gentle AI, del más nuevo al más viejo.
+gentle_backups() {
+  node -e '
+    const fs = require("fs"), path = require("path");
+    const root = path.join(process.env.GENTLE_AI_HOME || path.join(require("os").homedir(), ".gentle-ai"), "backups");
+    let out = [];
+    try { for (const d of fs.readdirSync(root)) { try { const m = JSON.parse(fs.readFileSync(path.join(root, d, "manifest.json"), "utf8")); out.push({ id: m.id || d, t: Date.parse(m.created_at || m.timestamp || m.createdAt || 0) || fs.statSync(path.join(root, d)).mtimeMs }); } catch {} } } catch {}
+    out.sort((a, b) => b.t - a.t); console.log(out.map((b) => b.id).join("\n"));' 2>/dev/null
+}
+GA_BEFORE="$(gentle_backups)"
 case "$GENTLE_MODE" in
   skip) info "Omitido (--skip-gentle)" ;;
   sync)
@@ -95,6 +112,15 @@ case "$GENTLE_MODE" in
     printf '    %s$ gentle-ai %s%s\n' "$C_BOLD" "${ga[*]}" "$C_RESET"
     if have gentle-ai; then gentle-ai "${ga[@]}" || die "gentle-ai install falló"; fi ;;
 esac
+if [ "$GENTLE_MODE" != skip ] && [ "$HG_DRY_RUN" != 1 ]; then
+  # gentle-ai guarda un backup antes de escribir. El más viejo de los nuevos es
+  # el estado de antes; si no creó ninguno (nada cambió), vale el último previo.
+  new_ids="$(gentle_backups | grep -vxF -f <(printf '%s\n' "$GA_BEFORE") || true)"
+  pre_id="$(printf '%s\n' "$new_ids" | sed '/^$/d' | tail -1)"
+  [ -n "$pre_id" ] || pre_id="$(printf '%s\n' "$GA_BEFORE" | sed -n 1p)"
+  st_add gentle "$GENTLE_MODE" "${pre_id:--}"
+  [ -n "$pre_id" ] && ok "backup previo de Gentle AI: $pre_id"
+fi
 
 # ---------------------------------------------------------------------------
 step "4/7 CodeGraph"
@@ -103,9 +129,14 @@ if [ "$WITH_CODEGRAPH" = 1 ]; then
   targets=""
   for a in $AGENT_LIST; do t="$(agent_codegraph_target "$a")"; [ -n "$t" ] && targets="$targets${targets:+,}$t"; done
   if have codegraph; then ok "codegraph ya instalado"
-  elif have npm; then run npm install -g @colbymchenry/codegraph@latest || die "No pude instalar CodeGraph"
-  elif have pnpm; then run pnpm add -g @colbymchenry/codegraph@latest || die "No pude instalar CodeGraph"
+  elif have npm; then run npm install -g @colbymchenry/codegraph@latest || die "No pude instalar CodeGraph"; st_add cg_cli npm
+  elif have pnpm; then run pnpm add -g @colbymchenry/codegraph@latest || die "No pude instalar CodeGraph"; st_add cg_cli pnpm
   else die "CodeGraph necesita npm o pnpm"; fi
+  # Solo anotamos los agentes donde CodeGraph no estaba: el uninstall no toca los tuyos.
+  for a in $AGENT_LIST; do
+    t="$(agent_codegraph_target "$a")"; [ -n "$t" ] || continue
+    if agent_has_mcp "$a" codegraph; then info "$a ya tenía CodeGraph"; else st_add cg_target "$t"; fi
+  done
   run codegraph install --target "$targets" --location global --yes || die "codegraph install falló ($targets)"
 else info "Omitido (--no-codegraph)"; fi
 
@@ -115,11 +146,12 @@ step "5/7 Skills herdr-core + gentle-herdr en cada agente"
 for a in $AGENT_LIST; do
   dir="$(agent_skills_dir "$a")"
   [ -n "$dir" ] || continue
-  run mkdir -p "$dir"
+  track_mkdir "$dir"
   # Enlaces: un `git pull` de este repo actualiza las skills en todos los agentes.
+  track_path "$dir/gentle-herdr"
   run ln -sfn "$HG_ROOT/skills/gentle-herdr" "$dir/gentle-herdr"
-  [ -e "$dir/herdr-core" ] && [ ! -L "$dir/herdr-core" ] && info "$a: ya tiene su skill herdr-core; la dejo" \
-    || run ln -sfn "$HG_ROOT/skills/herdr-core" "$dir/herdr-core"
+  if [ -e "$dir/herdr-core" ] && [ ! -L "$dir/herdr-core" ]; then info "$a: ya tiene su skill herdr-core; la dejo"
+  else track_path "$dir/herdr-core"; run ln -sfn "$HG_ROOT/skills/herdr-core" "$dir/herdr-core"; fi
   # La skill de la TUI (`herdr`) confunde a los agentes dentro de la app.
   if [ -f "$dir/herdr/SKILL.md" ] && grep -q '^name: herdr$' "$dir/herdr/SKILL.md"; then
     warn "$a: tiene la skill 'herdr' de la TUI en $dir/herdr; si solo usas la app, bórrala"
@@ -130,7 +162,7 @@ done
 # ---------------------------------------------------------------------------
 step "6/7 Roles de Gentle como templates de herdr-core"
 # ---------------------------------------------------------------------------
-run mkdir -p "$HC_TEMPLATES"
+track_mkdir "$HC_TEMPLATES"
 for a in $AGENT_LIST; do
   cmd="$(agent_hc_command "$a")"; short="$(agent_short "$a")"
   for role_file in "$HG_ROOT"/templates/*.md; do
@@ -138,6 +170,7 @@ for a in $AGENT_LIST; do
     out="$HC_TEMPLATES/gentle-$role-$short.md"
     desc="$(head -1 "$role_file") Runs $short."
     if [ "$HG_DRY_RUN" = 1 ]; then info "escribiría $out"; continue; fi
+    track_path "$out"
     {
       echo "---"
       echo "description: $desc"
@@ -154,17 +187,22 @@ done
 step "7/7 App Herdr: mod Gentle, tema y comandos"
 # ---------------------------------------------------------------------------
 bin_dir="$HOME/.local/bin"
-run mkdir -p "$bin_dir"
-run ln -sf "$HG_ROOT/usage/cli.mjs" "$bin_dir/gentle-usage"
-run ln -sf "$HG_ROOT/scripts/doctor.sh" "$bin_dir/herdr-gentle-doctor"
-run ln -sf "$HG_ROOT/scripts/project-init.sh" "$bin_dir/herdr-gentle-init"
+track_mkdir "$bin_dir"
+for pair in "usage/cli.mjs:gentle-usage" "scripts/doctor.sh:herdr-gentle-doctor" "scripts/project-init.sh:herdr-gentle-init"; do
+  track_path "$bin_dir/${pair#*:}"
+  run ln -sf "$HG_ROOT/${pair%%:*}" "$bin_dir/${pair#*:}"
+done
 case ":$PATH:" in *":$bin_dir:"*) ;; *) warn "Añade $bin_dir a tu PATH";; esac
 
 mod_dir="$APP_HOME/mods/gentle"
 if [ "$HG_DRY_RUN" = 1 ]; then
   info "copiaría app/mods/gentle → $mod_dir y app/themes/gentleman.json → $APP_HOME/themes/"
 else
-  mkdir -p "$mod_dir" "$APP_HOME/themes"
+  track_mkdir "$APP_HOME/mods"
+  track_path "$mod_dir"
+  track_mkdir "$mod_dir"
+  track_mkdir "$APP_HOME/themes"
+  track_path "$APP_HOME/themes/gentleman.json"
   cp "$HG_ROOT/app/mods/gentle/main.js" "$HG_ROOT/app/mods/gentle/mod.json" "$mod_dir/"
   # La app no hereda siempre tu PATH: rutas absolutas a node y al lector de consumo.
   node_bin="$(command -v node)"
@@ -175,7 +213,11 @@ else
   ok "tema → $APP_HOME/themes/gentleman.json"
   if have herdr-app; then
     if herdr-app check "$mod_dir"; then ok "herdr-app check: el mod carga"; else warn "herdr-app check falló; mira el error de arriba"; fi
-    if [ "$APPLY_THEME" = 1 ]; then herdr-app do app.theme '{"name":"gentleman"}' >/dev/null 2>&1 && ok "tema Gentleman activo" || warn "abre la app y elige el tema Gentleman en Ajustes"; fi
+    if [ "$APPLY_THEME" = 1 ]; then
+      prev_theme="$(node -e 'try{const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const t=s.theme;console.log(typeof t==="string"?t:t?JSON.stringify(t):"-")}catch{console.log("-")}' "$APP_HOME/settings.json")"
+      st_add theme "$prev_theme"
+      herdr-app do app.theme '{"name":"gentleman"}' >/dev/null 2>&1 && ok "tema Gentleman activo" || warn "abre la app y elige el tema Gentleman en Ajustes"
+    fi
   fi
 fi
 
@@ -184,3 +226,4 @@ info "1. Abre la app Herdr. El panel Gentle aparece a la derecha."
 info "2. Reinicia tus agentes para que carguen las skills nuevas."
 info "3. Pide a cualquier agente: \"explora X con un subagente codex\" (usa gentle-explorer-codex)."
 info "4. gentle-usage --table   consumo en la terminal · herdr-gentle-doctor   verifica todo"
+info "Para dejar todo como estaba: ./uninstall.sh"

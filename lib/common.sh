@@ -84,6 +84,13 @@ agent_mcp_list_cmd() {
   esac
 }
 
+# ¿El agente ya tiene ese MCP configurado? (para no borrar lo que era tuyo)
+agent_has_mcp() {
+  local cmd; cmd="$(agent_mcp_list_cmd "$1")"
+  if [ -n "$cmd" ] && have "$(agent_bin "$1")"; then $cmd 2>/dev/null | grep -qi "$2"; return; fi
+  case "$1" in cursor) grep -qi "$2" "$HOME/.cursor/mcp.json" 2>/dev/null ;; *) return 1 ;; esac
+}
+
 # Carpeta global de skills de cada agente (formato SKILL.md).
 agent_skills_dir() {
   case "$1" in
