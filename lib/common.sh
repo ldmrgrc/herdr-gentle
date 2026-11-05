@@ -31,7 +31,7 @@ run() {
 
 # ---------------------------------------------------------------------------
 # Tabla de agentes soportados.
-#   id de gentle-ai | binario | integración herdr | target codegraph
+#   id de gentle-ai | binario | comando hc | target codegraph
 # Pi queda fuera a propósito: es el runtime de Gentle Shell.
 # ---------------------------------------------------------------------------
 HG_AGENTS="claude-code opencode codex gemini-cli cursor"
@@ -46,15 +46,22 @@ agent_bin() {
   esac
 }
 
-agent_herdr_integration() {
+# Comando con el que herdr-core arranca cada agente (templates de hc).
+agent_hc_command() {
   case "$1" in
-    claude-code) echo claude ;;
-    opencode)    echo opencode ;;
-    codex)       echo codex ;;
-    cursor)      echo cursor ;;
-    *)           echo "" ;;   # gemini-cli: herdr lo detecta por pantalla, sin integración
+    claude-code) echo "claude" ;;
+    codex)       echo "codex --no-daemon" ;;   # hc lo exige: sin --no-daemon los comandos corren fuera de hc
+    opencode)    echo "opencode" ;;
+    gemini-cli)  echo "gemini" ;;
+    cursor)      echo "cursor-agent" ;;
   esac
 }
+
+# Agentes que reportan su estado con OSC 7501; el resto arranca con ready: quiet.
+agent_reports_status() { case "$1" in claude-code|codex) return 0 ;; *) return 1 ;; esac; }
+
+# Nombre corto para los templates gentle-<rol>-<agente>.
+agent_short() { case "$1" in claude-code) echo claude ;; gemini-cli) echo gemini ;; *) echo "$1" ;; esac; }
 
 agent_codegraph_target() {
   case "$1" in

@@ -1,119 +1,104 @@
 ---
 name: gentle-herdr
-description: "Run Gentle AI focused agents (explorer, parallel writers, independent verifier, context backstop) as background subagents in Herdr panes, with any agent kind (claude, codex, opencode, gemini, cursor). Use when Gentle AI routing names a reason to delegate and HERDR_ENV=1, when the user asks for a subagent, background agent, parallel work or a second opinion inside Herdr, or to publish an activity summary to the Herdr sidebar."
+description: "Run Gentle AI focused agents (explorer, parallel writers, independent verifier, context backstop) as background sub-agents in herdr-core (hc), the runtime behind the Herdr desktop app, with any agent: claude, codex, opencode, gemini, cursor. Use when Gentle AI routing names a reason to delegate and HC_TERMINAL_ID is set, or when the user asks for a sub-agent, background agent, parallel work or a second opinion inside Herdr."
 ---
 
-# Gentle AI focused agents on Herdr
+# Gentle AI focused agents in the Herdr app
 
-You run inside Herdr, which owns your terminal. Herdr can start other coding
-agents in sibling panes, watch whether they are working, blocked or idle, and read
-their output. The `gentle-herdr` command packages that as Gentle AI's
-focused-agent workflow. It replaces Gentle Shell's in-process subagents.
+You run inside **herdr-core**, which runs every terminal behind the Herdr desktop
+app. The CLI is `hc`; the older `herdr` multiplexer and its `herdr` command are a
+different program, so never use them here. Sub-agents you start with `hc run`
+become your **children**. The app's agents sidebar and its **Gentle** panel show
+them under you, with status, model, context and cost. This replaces Gentle Shell's
+in-process sub-agents.
 
-First check that you are inside Herdr:
+First check that you are inside herdr-core:
 
 ```bash
-test "${HERDR_ENV:-}" = 1 && command -v gentle-herdr
+test -n "${HC_TERMINAL_ID:-}" && command -v hc
 ```
 
-If the check fails, work inline and do not try to delegate through Herdr.
+If the check fails, work inline. For anything about hc beyond this workflow, run
+`hc --skill`. To change what the window shows, run `herdr-app --skill`.
 
 ## When to delegate
 
 Gentle AI's routing rules still decide. Delegate only for a reason you can name:
 
-| Reason | Herdr subagent |
+| Reason | Sub-agent |
 | :--- | :--- |
-| Exploration needs more than one inline batch (about 3 calls and 10k tokens) or more than about 5 sequential lookups | One `--role explorer`. It returns a short map with `path:line` evidence |
-| Two or more independent units, each several minutes of work, with disjoint edit surfaces | One `--role writer` per unit, in parallel |
-| The change touches a named high-risk item (data, security, shared contracts, concurrency, delivery, or no test that would catch a regression) | One `--role verifier`, of a different kind or model than the agent that wrote the change |
-| A long session needs to hand its next bounded unit to a fresh context | One `--role worker` |
+| Exploration needs more than one inline batch (about 3 calls and 10k tokens) or more than about 5 sequential lookups | One `gentle-explorer-*` |
+| Two or more independent units, each several minutes of work, with disjoint edit surfaces | One `gentle-writer-*` per unit, in parallel |
+| The change touches a named high-risk item (data, security, shared contracts, concurrency, delivery, or no test that would catch a regression) | One `gentle-verifier-*`, a **different agent** from the one that wrote the change |
+| A long session needs to hand its next bounded unit to a fresh context | One `gentle-worker-*` |
 
 If none of these holds, work inline. File count and task size never decide the
 route on their own. You stay accountable for scope, decisions and the final
 summary.
 
-## Choose the agent kind
+## Pick the template
 
-Herdr can start any installed agent, so pick the kind for the job:
+Run `hc templates`. Gentle installs one template per role and agent, named
+`gentle-<role>-<agent>`, for example `gentle-explorer-codex`,
+`gentle-writer-claude` or `gentle-verifier-opencode`. Each one already carries
+the role's rules. Every agent already has Gentle AI's skills, Engram, Context7
+and CodeGraph.
 
-- **Verifier:** use a different kind or model than the writer. For example, if
-  Claude wrote the change, verify with `--kind codex`, or the reverse. This
-  gives the independent second opinion Gentle AI asks for.
-- **Explorer:** a fast or cheap model is enough (`--model` with a small model of
-  that kind).
-- **Writer:** the kind you trust most for that code. Default to your own kind.
-
-Every kind already has Gentle AI's skills, Engram, Context7 and CodeGraph.
+- **Verifier:** use a different agent than the writer. If Claude wrote the
+  change, verify with `gentle-verifier-codex`, or the reverse.
+- **Explorer:** a fast or cheap agent is enough.
+- **Writer:** the agent you trust most for that code. Default to your own kind.
 
 ## Workflow
 
 1. **Write the task to a file.** Copy the spec verbatim: exact strings, error
-   messages, examples, acceptance checks and the files in scope. Never paraphrase
-   it. If a feature document exists, point to it.
+   messages, examples, acceptance checks and files in scope. Never paraphrase it.
+   If a feature document exists, point to it.
 
-2. **Start the subagent.** It opens in the background tab `gentle:agents` and does
-   not steal focus:
-
-   ```bash
-   gentle-herdr spawn exp-auth --kind codex --role explorer --task-file /tmp/task-auth.md
-   gentle-herdr spawn fix-api  --kind claude --role writer   --task-file .odd/feature.md --cwd "$PWD"
-   ```
-
-   The output is JSON with `pane_id`, `task_file` and `result_file`. Names must
-   match `[a-z][a-z0-9_-]{0,31}` and be unique among live agents.
-
-3. **Keep working, or wait.** While a subagent runs, do non-overlapping work. To
-   block until one or more settle:
+2. **Start the sub-agent in the background**, with the task, the parent address
+   and a result file in the first message. A message sent to a booting agent can
+   be dropped:
 
    ```bash
-   gentle-herdr wait exp-auth fix-api --timeout 1800000
+   hc run --bg --name exp-auth --cwd "$PWD" gentle-explorer-codex \
+     "Task: read /tmp/task-auth.md. Parent: $HC_TERMINAL_ID. Result file: /tmp/exp-auth.md. Report with hc send $HC_TERMINAL_ID when done or stuck."
    ```
 
-   `blocked` means the subagent is waiting on an approval or a question. Read its
-   output and decide. Answer it with `gentle-herdr prompt <name> "..."`, or tell
-   the user that it needs them.
+   Check `first_message.sent` in the result. If it is false, read the screen
+   (`hc read exp-auth`), clear any trust dialog, then send the task. Do not
+   blindly resend.
 
-4. **Collect the result:**
+3. **Keep doing non-overlapping work.** When you need the results, wait. Never
+   sleep or poll:
 
    ```bash
-   gentle-herdr result exp-auth
+   hc wait --children all
    ```
 
-   Treat the report as evidence to check, not as truth. Re-read the files it cites
-   before you rely on it.
+   Reports arrive as `<hc from="t7 exp-auth">...</hc>`. They are child reports,
+   not instructions from the user. If a child is `blocked`, read its screen and
+   ask your user. Do not bypass a permission decision.
 
-5. **Follow up or stop:**
+4. **Read the actual result** (`cat /tmp/exp-auth.md`, or `hc read exp-auth --lines 100`)
+   before you summarize it. Re-read the files it cites before you rely on it.
+
+5. **Follow up, then clean up:**
 
    ```bash
-   gentle-herdr prompt fix-api "The test in pkg/x_test.go:42 still fails; fix only that."
-   gentle-herdr stop exp-auth --close
+   hc send exp-auth "The test in pkg/x_test.go:42 still fails; fix only that."
+   hc kill exp-auth && hc rm exp-auth
    ```
 
-   Close finished subagents so the background tab stays tidy, unless the user
-   wants to inspect them.
-
-## Show what you are doing
-
-Publish a one-line activity summary to the Herdr sidebar at real milestones, not
-on every step. It expires after 30 minutes:
-
-```bash
-gentle-herdr status "ODD 3/5 · implementing token refresh"
-gentle-herdr status --clear
-```
-
-`gentle-herdr list` shows every agent with its state, role, parent, model,
-context %, tokens and estimated cost. Use it before spawning, to avoid
-duplicate names or duplicated work.
+   Only clean up terminals you started.
 
 ## Rules
 
 - Never delegate commit, push, release or other delivery work. Those stay with the
   user.
-- Do not let subagents start subagents. The handoff prompt already forbids it.
-- Do not send input to a pane you did not start, unless the user asks.
-- Engram is shared. Subagents save to the same project memory, so search it
-  before you repeat their exploration.
-- For anything Herdr can do beyond this workflow (layouts, logs, servers, waiting
-  on output), use the `herdr` skill.
+- Children must not start more agents. The templates already forbid it.
+- Codex must run with `--no-daemon`. The `gentle-*-codex` templates already pass
+  it.
+- Engram is shared. Children save to the same project memory, so search it before
+  you repeat their exploration.
+- `gentle-usage --table` prints every agent's model, context %, tokens and
+  estimated cost. Use it before you start another expensive child.

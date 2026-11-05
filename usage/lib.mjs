@@ -1,12 +1,12 @@
 // Per-session usage (model, tokens, context, cost) read from each agent's own
-// session files. herdr's integrations tell us which session a pane is running
-// (`agent_session`), so we never guess between two agents in the same folder
-// unless the integration is missing.
+// session files. The parsers are exported so cli.mjs can match herdr-core
+// terminals to their session by folder and start time.
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
 
 const HOME = homedir();
 const CLAUDE_DIR = process.env.CLAUDE_CONFIG_DIR || join(HOME, ".claude");
@@ -17,15 +17,15 @@ const GEMINI_DIR = join(HOME, ".gemini");
 
 // ---------------------------------------------------------------------------
 // Prices (USD per million tokens). Defaults ship with the plugin; a copy in
-// HERDR_PLUGIN_CONFIG_DIR/prices.json wins so you can fix or extend them.
+// ~/.config/herdr-gentle/prices.json wins so you can fix or extend them.
 // ---------------------------------------------------------------------------
 let pricesCache;
 export function loadPrices() {
   if (pricesCache) return pricesCache;
   const here = dirname(fileURLToPath(import.meta.url));
   const candidates = [
-    process.env.HERDR_PLUGIN_CONFIG_DIR && join(process.env.HERDR_PLUGIN_CONFIG_DIR, "prices.json"),
-    join(here, "..", "prices.json"),
+    join(process.env.XDG_CONFIG_HOME || join(HOME, ".config"), "herdr-gentle", "prices.json"),
+    join(here, "prices.json"),
   ].filter(Boolean);
   for (const file of candidates) {
     try { pricesCache = JSON.parse(readFileSync(file, "utf8")).models || []; return pricesCache; } catch { /* next */ }
@@ -321,4 +321,98 @@ export function sidebarTokens(u) {
     tok: fmtTokens(totalTokens(u)),
     cost: fmtCost(u),
   };
+}
+
+// ---------------------------------------------------------------------------
+// herdr-core terminals → session files. herdr-core does not know an agent's
+// session id, so we match by folder and start time, and never give one file
+// to two terminals.
+// ---------------------------------------------------------------------------
+function firstTimestamp(file) {
+  try {
+    const head = readFileSync(file, "utf8").slice(0, 64 * 1024);
+    for (const ev of jsonLines(head)) {
+      const ts = ev.timestamp || ev.payload?.timestamp;
+      if (ts) return Date.parse(ts);
+    }
+  } catch { /* unreadable */ }
+  return statSync(file).birthtimeMs || statSync(file).mtimeMs;
+}
+
+function pickClosest(files, createdMs, used) {
+  let best = null;
+  for (const f of files) {
+    if (used.has(f)) continue;
+    let st; try { st = statSync(f); } catch { continue; }
+    if (createdMs && st.mtimeMs < createdMs - 5000) continue; // not touched since the terminal started
+    const d = createdMs ? Math.abs(firstTimestamp(f) - createdMs) : -st.mtimeMs;
+    if (!best || d < best.d) best = { f, d };
+  }
+  if (best) used.add(best.f);
+  return best?.f ?? null;
+}
+
+function listDir(dir, test) {
+  try { return readdirSync(dir).filter(test).map((n) => join(dir, n)); } catch { return []; }
+}
+
+function codexCandidates(createdMs, cwd) {
+  const out = [];
+  const root = join(CODEX_DIR, "sessions");
+  const days = new Set();
+  for (const t of [createdMs || Date.now(), Date.now()]) {
+    const d = new Date(t);
+    days.add(join(root, String(d.getFullYear()), String(d.getMonth() + 1).padStart(2, "0"), String(d.getDate()).padStart(2, "0")));
+  }
+  for (const dir of days) {
+    for (const f of listDir(dir, (n) => n.endsWith(".jsonl"))) {
+      try {
+        const first = JSON.parse(readFileSync(f, "utf8").split("\n", 1)[0]);
+        if (!cwd || first?.payload?.cwd === cwd) out.push(f);
+      } catch { /* skip */ }
+    }
+  }
+  return out;
+}
+
+function openCodeSessionFor(cwd, createdMs) {
+  const db = join(OPENCODE_DIR, "opencode.db");
+  if (!existsSync(db) || !cwd) return null;
+  const q = `select id from session where directory='${cwd.replace(/'/g, "''")}' and time_updated >= ${Math.floor((createdMs || 0) - 5000)} order by abs(time_created - ${Math.floor(createdMs || Date.now())}) limit 1;`;
+  const res = spawnSync("sqlite3", ["-readonly", db, q], { encoding: "utf8", timeout: 4000 });
+  return res.status === 0 && res.stdout.trim() ? { kind: "id", value: res.stdout.trim() } : null;
+}
+
+/** Normalize what herdr-core says a terminal runs into one of our agent kinds. */
+export function agentKind(t) {
+  const names = [t.status?.app, ...(Object.values(t.records || {}).map((r) => r?.app)),
+    t.foreground?.name, t.foreground?.argv?.[0], t.argv?.[0], t.template].filter(Boolean).map((s) => String(s).toLowerCase());
+  for (const n of names) {
+    if (n.includes("claude")) return "claude";
+    if (n.includes("codex")) return "codex";
+    if (n.includes("opencode") || n.includes("kilo")) return "opencode";
+    if (n.includes("gemini")) return "gemini";
+  }
+  return null;
+}
+
+/** Usage for a herdr-core terminal ({address, kind, cwd, createdMs}). `used` avoids double matches. */
+export function usageForTerminal({ kind, cwd, createdMs }, used = new Set()) {
+  try {
+    if (kind === "claude" && cwd) {
+      const f = pickClosest(listDir(join(CLAUDE_DIR, "projects", claudeSlug(cwd)), (n) => n.endsWith(".jsonl")), createdMs, used);
+      return f && cached(f, parseClaude);
+    }
+    if (kind === "codex") {
+      const f = pickClosest(codexCandidates(createdMs, cwd), createdMs, used);
+      return f && cached(f, parseCodex);
+    }
+    if (kind === "opencode") return openCodeUsage(openCodeSessionFor(cwd, createdMs));
+    if (kind === "gemini" && cwd) {
+      const hash = createHash("sha256").update(cwd).digest("hex");
+      const f = pickClosest(listDir(join(GEMINI_DIR, "tmp", hash, "chats"), (n) => n.endsWith(".json")), createdMs, used);
+      return f && cached(f, parseGemini);
+    }
+  } catch { /* show nothing rather than wrong numbers */ }
+  return null;
 }

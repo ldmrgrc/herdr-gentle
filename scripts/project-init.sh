@@ -30,4 +30,4 @@ else
   (cd "$target" && run engram init) || warn "engram init falló; Engram detectará el proyecto por el directorio"
 fi
 
-ok "Proyecto listo. Abre un agente en un panel de herdr dentro de $target."
+ok "Proyecto listo. Abre la app Herdr en $target y lanza tu agente."

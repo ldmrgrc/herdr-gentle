@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Verifica que skills, MCP (engram, context7, codegraph) e integraciones de herdr
-# estén activos para cada agente configurado. Solo lectura.
+# Verifica skills, MCP (engram, context7, codegraph), templates de herdr-core y
+# el mod Gentle de la app Herdr para cada agente. Solo lectura.
 #
 # Uso: herdr-gentle-doctor [--agents a,b]
 set -u
@@ -15,12 +15,12 @@ AGENTS=""
 problems=0
 
 step "Binarios"
-for bin in herdr gentle-ai engram codegraph node; do
+for bin in herdr-app hc gentle-ai engram codegraph node gentle-usage; do
   if have "$bin"; then ok "$bin → $(command -v "$bin")"; else fail "$bin no encontrado"; problems=$((problems+1)); fi
 done
 
-step "Dentro de herdr"
-if [ "${HERDR_ENV:-}" = 1 ]; then ok "HERDR_ENV=1 (este shell es un panel de herdr)"; else info "No estás en un panel de herdr (normal si lo ejecutas fuera)"; fi
+step "Dentro de herdr-core"
+if [ -n "${HC_TERMINAL_ID:-}" ]; then ok "HC_TERMINAL_ID=$HC_TERMINAL_ID (terminal de la app Herdr)"; else info "No estás en una terminal de herdr-core (normal si lo ejecutas fuera de la app)"; fi
 
 step "MCP por agente"
 for a in $(split_list "$AGENTS"); do
@@ -41,18 +41,29 @@ for a in $(split_list "$AGENTS"); do
   [ -d "$dir" ] || { info "$a: sin carpeta de skills ($dir)"; continue; }
   n=$(find -L "$dir" -name SKILL.md 2>/dev/null | wc -l | tr -d ' ')
   missing_s=""
-  for s in herdr gentle-herdr; do [ -f "$dir/$s/SKILL.md" ] || missing_s="$missing_s $s"; done
-  if [ -z "$missing_s" ]; then ok "$a: $n skills (incluye herdr y gentle-herdr)"
+  for s in herdr-core gentle-herdr; do [ -f "$dir/$s/SKILL.md" ] || missing_s="$missing_s $s"; done
+  if [ -z "$missing_s" ]; then ok "$a: $n skills (incluye herdr-core y gentle-herdr)"
   else fail "$a: faltan skills:$missing_s"; problems=$((problems+1)); fi
 done
 
-step "Plugin gentle.herdr"
-if have herdr && herdr plugin list 2>/dev/null | grep -q gentle.herdr; then ok "enlazado"
-else fail "plugin no enlazado → herdr plugin link $HG_ROOT/plugin"; problems=$((problems+1)); fi
-have gentle-herdr && ok "gentle-herdr en PATH" || { fail "gentle-herdr no está en PATH"; problems=$((problems+1)); }
+step "Templates de herdr-core"
+tdir="${XDG_CONFIG_HOME:-$HOME/.config}/herdr-core/templates"
+n=$(ls "$tdir"/gentle-*.md 2>/dev/null | wc -l | tr -d ' ')
+if [ "$n" -gt 0 ]; then ok "$n templates gentle-* en $tdir"; else fail "sin templates gentle-* → ./install.sh"; problems=$((problems+1)); fi
 
-step "Integraciones de herdr"
-have herdr && { herdr integration status 2>&1 | sed 's/^/    /'; }
+step "App Herdr: mod Gentle"
+app_home="${HERDR_APP_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}/herdr-app}"
+if [ -f "$app_home/mods/gentle/main.js" ]; then
+  ok "mod en $app_home/mods/gentle"
+  if have herdr-app; then
+    if herdr-app check "$app_home/mods/gentle" >/dev/null 2>&1; then ok "herdr-app check OK"
+    else fail "herdr-app check falló → herdr-app check $app_home/mods/gentle"; problems=$((problems+1)); fi
+  fi
+else fail "mod Gentle no instalado → ./install.sh"; problems=$((problems+1)); fi
+if have gentle-usage; then
+  if gentle-usage 2>/dev/null | grep -q '"hc_ok":true'; then ok "gentle-usage lee herdr-core"
+  else fail "gentle-usage no pudo leer 'hc ls' (¿está corriendo la app/herdr-core?)"; problems=$((problems+1)); fi
+fi
 
 step "Proyecto actual ($PWD)"
 [ -d .codegraph ] && ok "CodeGraph indexado" || info "Sin índice CodeGraph → herdr-gentle-init ."
