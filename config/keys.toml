@@ -1,0 +1,49 @@
+# Atajos de herdr para Gentle (sin Gentle Shell). install.sh inserta este
+# bloque en ~/.config/herdr/config.toml entre marcadores.
+
+# Panel Gentle: agentes (incluidos los de fondo), consumo y cambios.
+# Equivale a alt+a / /gentle:usage / alt+g de Gentle Shell.
+[[keys.command]]
+key = "prefix+a"
+type = "shell"
+command = "\"${HERDR_BIN_PATH:-herdr}\" plugin pane open --plugin gentle.herdr --entrypoint dashboard"
+description = "gentle: agentes"
+
+[[keys.command]]
+key = "prefix+u"
+type = "shell"
+command = "\"${HERDR_BIN_PATH:-herdr}\" plugin pane open --plugin gentle.herdr --entrypoint usage"
+description = "gentle: consumo"
+
+[[keys.command]]
+key = "prefix+alt+c"
+type = "shell"
+command = "\"${HERDR_BIN_PATH:-herdr}\" plugin pane open --plugin gentle.herdr --entrypoint changes"
+description = "gentle: cambios sin commitear"
+
+# Memoria Engram.
+[[keys.command]]
+key = "prefix+alt+m"
+type = "popup"
+command = "engram tui"
+description = "gentle: engram (memoria)"
+width = "90%"
+height = "90%"
+
+# Indexa con CodeGraph el proyecto del panel activo.
+[[keys.command]]
+key = "prefix+alt+g"
+type = "popup"
+command = "gentle-ai codegraph init --cwd \"${HERDR_ACTIVE_PANE_CWD:-$PWD}\"; printf '\\n[enter para cerrar] '; read _"
+description = "gentle: codegraph init"
+width = "80%"
+height = "60%"
+
+# Diagnóstico: skills, MCP, plugin e integraciones.
+[[keys.command]]
+key = "prefix+alt+d"
+type = "popup"
+command = "herdr-gentle-doctor; printf '\\n[enter para cerrar] '; read _"
+description = "gentle: doctor"
+width = "90%"
+height = "90%"

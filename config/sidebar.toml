@@ -1,0 +1,12 @@
+# Barra lateral estilo Gentle Shell: modelo, contexto, tokens y costo de cada
+# agente; resumen de actividad; rol y padre de los subagentes de fondo.
+# Los valores $... los publica el plugin gentle.herdr y el comando gentle-herdr.
+[ui.sidebar.agents]
+row_gap = 0
+rows = [
+  ["state_icon", "agent", { token = "$model", dim = true }, "$ctx", { token = "$cost", fg = "#a6e3a1" }],
+  [{ token = "$ctxwarn", fg = "#f38ba8", bold = true }],
+  [{ token = "$summary", fg = "#f095c8" }],
+  [{ token = "$role", fg = "#89b4fa" }, { token = "$task", dim = true }],
+  ["workspace", "tab"],
+]

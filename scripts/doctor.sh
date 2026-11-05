@@ -15,7 +15,7 @@ AGENTS=""
 problems=0
 
 step "Binarios"
-for bin in herdr gentle-ai engram codegraph node npx; do
+for bin in herdr gentle-ai engram codegraph node; do
   if have "$bin"; then ok "$bin → $(command -v "$bin")"; else fail "$bin no encontrado"; problems=$((problems+1)); fi
 done
 
@@ -36,12 +36,20 @@ for a in $(split_list "$AGENTS"); do
 done
 
 step "Skills"
-claude_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-if [ -d "$claude_dir/skills" ]; then
-  n=$(find "$claude_dir/skills" -name SKILL.md 2>/dev/null | wc -l | tr -d ' ')
-  ok "Claude Code: $n skills en $claude_dir/skills"
-  [ -f "$claude_dir/skills/herdr/SKILL.md" ] && ok "skill herdr presente" || warn "skill herdr ausente en Claude Code"
-fi
+for a in $(split_list "$AGENTS"); do
+  dir="$(agent_skills_dir "$a")"
+  [ -d "$dir" ] || { info "$a: sin carpeta de skills ($dir)"; continue; }
+  n=$(find -L "$dir" -name SKILL.md 2>/dev/null | wc -l | tr -d ' ')
+  missing_s=""
+  for s in herdr gentle-herdr; do [ -f "$dir/$s/SKILL.md" ] || missing_s="$missing_s $s"; done
+  if [ -z "$missing_s" ]; then ok "$a: $n skills (incluye herdr y gentle-herdr)"
+  else fail "$a: faltan skills:$missing_s"; problems=$((problems+1)); fi
+done
+
+step "Plugin gentle.herdr"
+if have herdr && herdr plugin list 2>/dev/null | grep -q gentle.herdr; then ok "enlazado"
+else fail "plugin no enlazado → herdr plugin link $HG_ROOT/plugin"; problems=$((problems+1)); fi
+have gentle-herdr && ok "gentle-herdr en PATH" || { fail "gentle-herdr no está en PATH"; problems=$((problems+1)); }
 
 step "Integraciones de herdr"
 have herdr && { herdr integration status 2>&1 | sed 's/^/    /'; }

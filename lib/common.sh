@@ -77,6 +77,20 @@ agent_mcp_list_cmd() {
   esac
 }
 
+# Carpeta global de skills de cada agente (formato SKILL.md).
+agent_skills_dir() {
+  case "$1" in
+    claude-code) echo "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills" ;;
+    codex)       echo "${CODEX_HOME:-$HOME/.codex}/skills" ;;
+    opencode)    echo "${XDG_CONFIG_HOME:-$HOME/.config}/opencode/skills" ;;
+    gemini-cli)  echo "$HOME/.gemini/skills" ;;
+    cursor)      echo "$HOME/.cursor/skills" ;;
+  esac
+}
+
+# Versión "x.y.z" >= "a.b.c"
+version_ge() { [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -1)" = "$2" ]; }
+
 is_supported_agent() {
   local a
   for a in $HG_AGENTS; do [ "$a" = "$1" ] && return 0; done
