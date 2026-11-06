@@ -14,7 +14,7 @@
 #                      ya está instalado, por defecto solo se hace `gentle-ai sync`)
 #   --skip-gentle      No tocar la configuración de Gentle AI
 #   --persona P        gentleman (defecto) | neutral | custom   (con --gentle-install)
-#   --theme            Activa el tema Gentleman en la app
+#   --theme            Usa el tema Gentleman en el layout Gentle (tu main no cambia)
 #   --no-codegraph     No instalar CodeGraph
 #   --dry-run          Solo mostrar lo que se haría
 #   -h, --help         Esta ayuda
@@ -197,6 +197,7 @@ case ":$PATH:" in *":$bin_dir:"*) ;; *) warn "Añade $bin_dir a tu PATH";; esac
 mod_dir="$APP_HOME/mods/gentle"
 if [ "$HG_DRY_RUN" = 1 ]; then
   info "copiaría app/mods/gentle → $mod_dir y app/themes/gentleman.json → $APP_HOME/themes/"
+  info "crearía el layout $APP_HOME/layouts/gentle.json (tu main + panel Gentle) y cambiaría la app a él"
 else
   track_mkdir "$APP_HOME/mods"
   track_path "$mod_dir"
@@ -209,20 +210,39 @@ else
   printf '// Written by herdr-gentle install.sh.\nexport const NODE = %s;\nexport const CLI = %s;\n' \
     "\"$node_bin\"" "\"$HG_ROOT/usage/cli.mjs\"" > "$mod_dir/config.js"
   cp "$HG_ROOT/app/themes/gentleman.json" "$APP_HOME/themes/gentleman.json"
-  ok "mod Gentle → $mod_dir (se acopla a la derecha la primera vez)"
+  ok "mod Gentle → $mod_dir"
   ok "tema → $APP_HOME/themes/gentleman.json"
+
+  # La app nunca acopla mods nuevos en sus layouts de fábrica (main, terminals,
+  # win98). Creamos un layout personal "gentle": tu main + el panel Gentle bajo
+  # Agents. El main de fábrica no se toca; ctrl-shift-l cambia entre layouts.
+  main_layout="$APP_HOME/layouts/main.json"
+  if [ -f "$main_layout" ]; then
+    track_path "$APP_HOME/layouts/gentle.json"
+    theme_arg=""; [ "$APPLY_THEME" = 1 ] && theme_arg="gentleman"
+    node "$HG_ROOT/scripts/make-layout.mjs" "$main_layout" "$APP_HOME/layouts/gentle.json" $theme_arg >/dev/null \
+      && ok "layout Gentle → $APP_HOME/layouts/gentle.json${theme_arg:+ (con tema Gentleman)}"
+    prev_layout="$(node -e 'try{const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));console.log(typeof s.layout==="string"?s.layout:"-")}catch{console.log("-")}' "$APP_HOME/shared.json")"
+    # Si ya estabas en "gentle" por una instalación anterior, no lo cuentes como el previo.
+    [ "$prev_layout" = gentle ] && prev_layout="-"
+    st_add_once layout "$prev_layout"
+    if have herdr-app && herdr-app do layout.switch '{"name":"gentle"}' >/dev/null 2>&1; then
+      ok "la app ya muestra el layout Gentle"
+    else
+      # App cerrada: la app arranca con el layout guardado en shared.json.
+      node -e 'const fs=require("fs"),f=process.argv[1];let s={};try{s=JSON.parse(fs.readFileSync(f,"utf8"))}catch{};s.layout="gentle";fs.writeFileSync(f,JSON.stringify(s))' "$APP_HOME/shared.json" \
+        && ok "la app abrirá con el layout Gentle"
+    fi
+  else
+    warn "No encuentro $main_layout: abre la app Herdr una vez, ciérrala y vuelve a ejecutar ./install.sh"
+  fi
   if have herdr-app; then
     if herdr-app check "$mod_dir"; then ok "herdr-app check: el mod carga"; else warn "herdr-app check falló; mira el error de arriba"; fi
-    if [ "$APPLY_THEME" = 1 ]; then
-      prev_theme="$(node -e 'try{const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const t=s.theme;console.log(typeof t==="string"?t:t?JSON.stringify(t):"-")}catch{console.log("-")}' "$APP_HOME/settings.json")"
-      st_add theme "$prev_theme"
-      herdr-app do app.theme '{"name":"gentleman"}' >/dev/null 2>&1 && ok "tema Gentleman activo" || warn "abre la app y elige el tema Gentleman en Ajustes"
-    fi
   fi
 fi
 
 step "Listo"
-info "1. Abre la app Herdr. El panel Gentle aparece a la derecha."
+info "1. Abre (o reinicia) la app Herdr: el panel Gentle está bajo Agents, en el layout Gentle."
 info "2. Reinicia tus agentes para que carguen las skills nuevas."
 info "3. Pide a cualquier agente: \"explora X con un subagente codex\" (usa gentle-explorer-codex)."
 info "4. gentle-usage --table   consumo en la terminal · herdr-gentle-doctor   verifica todo"

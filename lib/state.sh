@@ -7,7 +7,8 @@
 #   cg_target <t>    -          CodeGraph registrado por nosotros en ese agente
 #   cg_cli   <npm|pnpm> -       CLI de CodeGraph instalada por nosotros
 #   gentle   <modo>  <id|->     modo sync/install y backup de Gentle AI previo
-#   theme    <previo|-> -       tema de la app antes de --theme
+#   theme    <previo|-> -       (versiones anteriores) tema de la app antes de --theme
+#   layout   <previo|-> -       layout de la app antes de cambiar a "gentle"
 #   project  <ruta>  <0|1>      proyecto indexado; 1 = añadimos .codegraph/ al exclude
 # Si instalas dos veces, solo cuenta la primera vez: así "orig" siempre es el
 # estado de antes de herdr-gentle, no una copia de nuestros propios archivos.
@@ -28,6 +29,9 @@ st_init() {
   fi
   mkdir -p "$HG_BACKUP"; touch "$HG_LOG"
 }
+
+# st_add_once <tipo> <valor> — solo si todavía no hay ninguna línea de ese tipo.
+st_add_once() { [ -f "$HG_LOG" ] && awk -F'\t' -v t="$1" '$1==t {f=1} END {exit !f}' "$HG_LOG" && return 0; st_add "$@"; }
 
 # st_has <tipo> <clave>
 st_has() { [ -f "$HG_LOG" ] && awk -F'\t' -v t="$1" -v k="$2" '$1==t && $2==k {f=1} END {exit !f}' "$HG_LOG"; }

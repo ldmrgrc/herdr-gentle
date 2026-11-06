@@ -13,7 +13,7 @@ La app Herdr no es la TUI. Dibuja su interfaz con **mods** (JavaScript sobre GPU
 
 | Gentle Shell | En la app Herdr |
 | :--- | :--- |
-| Tarjetas de subagentes (modelo, tokens, costo) | Mod **Gentle** (panel derecho): árbol padre → subagentes con modelo, barra de contexto, tokens y costo. Un clic va al agente (`agent.focus`) |
+| Tarjetas de subagentes (modelo, tokens, costo) | Mod **Gentle** (barra izquierda, bajo Agents, en el layout *Gentle*): árbol padre → subagentes con modelo, barra de contexto, tokens y costo. Un clic va al agente (`agent.focus`) |
 | `/gentle:usage` | Sección **HOY** del panel: sesiones y costo por modelo |
 | Aviso de contexto | Notificación de la app cuando un agente pasa del 80% de su contexto. Clic → va al agente |
 | Agentes enfocados (explorer, writers, verifier) | Templates `gentle-<rol>-<agente>` + `hc run --bg`. herdr-core los registra como hijos, y la app los muestra y permite *peek* |
@@ -50,7 +50,7 @@ El instalador hace esto:
 6. Escribe `~/.config/herdr-core/templates/gentle-{explorer,writer,verifier,worker}-<agente>.md`. Codex se lanza con `--no-daemon`, como pide hc. Los agentes que no reportan estado usan `ready: quiet`.
 7. Copia el mod a `~/.config/herdr-app/mods/gentle` y el tema a `~/.config/herdr-app/themes/`. Luego ejecuta `herdr-app check` sobre el mod y enlaza `gentle-usage`, `herdr-gentle-doctor` y `herdr-gentle-init` en `~/.local/bin`.
 
-No modifica tu `keys.json` ni los layouts que trae la app. El mod se acopla solo a la derecha la primera vez. Cada cambio queda anotado para que `./uninstall.sh` lo pueda deshacer.
+No modifica tu `keys.json` ni los layouts que trae la app. La app nunca acopla mods nuevos en sus layouts de fábrica (`main`, `terminals`, `win98`), así que el instalador crea un layout personal **Gentle**: tu `main` con el panel Gentle bajo Agents. Además, cambia la app a ese layout. Con `--theme`, el tema Gentleman va solo en ese layout. `ctrl-shift-l` cambia entre layouts. Cada cambio queda anotado para que `./uninstall.sh` lo pueda deshacer.
 
 ## Uso
 

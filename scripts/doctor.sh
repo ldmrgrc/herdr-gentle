@@ -60,6 +60,13 @@ if [ -f "$app_home/mods/gentle/main.js" ]; then
     else fail "herdr-app check falló → herdr-app check $app_home/mods/gentle"; problems=$((problems+1)); fi
   fi
 else fail "mod Gentle no instalado → ./install.sh"; problems=$((problems+1)); fi
+# La app no acopla mods nuevos en sus layouts de fábrica: el panel vive en el layout "gentle".
+if [ -f "$app_home/layouts/gentle.json" ]; then
+  ok "layout Gentle en $app_home/layouts/gentle.json"
+  shown="$(node -e 'try{console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).layout||"main")}catch{console.log("?")}' "$app_home/shared.json" 2>/dev/null)"
+  if [ "$shown" = gentle ]; then ok "la app usa el layout Gentle"
+  else warn "la app muestra el layout '$shown': cambia a Gentle con ctrl-shift-l (o paleta → Switch layout)"; fi
+else fail "falta el layout Gentle → abre la app una vez y vuelve a ejecutar ./install.sh"; problems=$((problems+1)); fi
 if have gentle-usage; then
   if gentle-usage 2>/dev/null | grep -q '"hc_ok":true'; then ok "gentle-usage lee herdr-core"
   else fail "gentle-usage no pudo leer 'hc ls' (¿está corriendo la app/herdr-core?)"; problems=$((problems+1)); fi
