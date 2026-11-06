@@ -25,7 +25,7 @@ st_init() {
     local d; d="$(dirname "$HG_STATE_DIR")"; local parents=()
     while [ -n "$d" ] && [ "$d" != "/" ] && [ ! -e "$d" ]; do parents+=("$d"); d="$(dirname "$d")"; done
     mkdir -p "$HG_STATE_DIR"
-    [ "${#parents[@]}" -gt 0 ] && printf '%s\n' "${parents[@]}" > "$HG_STATE_DIR/.created_parents"
+    [ -n "${parents[*]-}" ] && printf '%s\n' "${parents[@]}" > "$HG_STATE_DIR/.created_parents"
   fi
   mkdir -p "$HG_BACKUP"; touch "$HG_LOG"
 }
@@ -47,8 +47,8 @@ st_add() {
 track_mkdir() {
   [ "${HG_DRY_RUN:-0}" = 1 ] && return 0
   local d="$1" missing=()
-  while [ -n "$d" ] && [ "$d" != "/" ] && [ ! -e "$d" ]; do missing=("$d" "${missing[@]}"); d="$(dirname "$d")"; done
-  local m; for m in "${missing[@]}"; do st_add mkdir "$m"; done
+  while [ -n "$d" ] && [ "$d" != "/" ] && [ ! -e "$d" ]; do missing=("$d" ${missing[@]+"${missing[@]}"}); d="$(dirname "$d")"; done
+  local m; for m in ${missing[@]+"${missing[@]}"}; do st_add mkdir "$m"; done
   mkdir -p "$1"
 }
 
